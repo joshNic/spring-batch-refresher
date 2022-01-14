@@ -65,11 +65,38 @@ public class SpringBatchApplication {
     }
 
     @Bean
+    public JobExecutionDecider receiptDecider() {
+        return new ReceiptDecider();
+    }
+
+    @Bean
     public Step storePackageStep() {
         return this.stepBuilderFactory.get("storePackageStep").tasklet(new Tasklet() {
             @Override
             public RepeatStatus execute(StepContribution stepContribution, ChunkContext chunkContext) throws Exception {
                 System.out.println("Storing the package while the customer address is being located ");
+                return RepeatStatus.FINISHED;
+            }
+        }).build();
+    }
+
+    @Bean
+    public Step thankCustomerStep() {
+        return this.stepBuilderFactory.get("thankCustomerStep").tasklet(new Tasklet() {
+            @Override
+            public RepeatStatus execute(StepContribution stepContribution, ChunkContext chunkContext) throws Exception {
+                System.out.println("Correct Item delivered thanking customer ");
+                return RepeatStatus.FINISHED;
+            }
+        }).build();
+    }
+
+    @Bean
+    public Step refundCustomerStep() {
+        return this.stepBuilderFactory.get("refundCustomerStep").tasklet(new Tasklet() {
+            @Override
+            public RepeatStatus execute(StepContribution stepContribution, ChunkContext chunkContext) throws Exception {
+                System.out.println("Incorrect Item delivered refunding customer");
                 return RepeatStatus.FINISHED;
             }
         }).build();
@@ -109,6 +136,8 @@ public class SpringBatchApplication {
                 .to(decider())
                 .on("PRESENT")
                 .to(givePackageToCustomerStep())
+                .next(receiptDecider()).on("CORRECT").to(thankCustomerStep())
+                .from(receiptDecider()).on("INCORRECT").to(refundCustomerStep())
                 .from(decider())
                 .on("NOT_PRESENT")
                 .to(leaveAtDoorStep())
