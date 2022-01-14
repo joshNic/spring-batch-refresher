@@ -7,7 +7,10 @@ import org.springframework.batch.core.StepExecutionListener;
 import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
 import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
 import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
+import org.springframework.batch.core.job.builder.FlowBuilder;
+import org.springframework.batch.core.job.flow.Flow;
 import org.springframework.batch.core.job.flow.JobExecutionDecider;
+import org.springframework.batch.core.job.flow.support.SimpleFlow;
 import org.springframework.batch.core.scope.context.ChunkContext;
 import org.springframework.batch.core.step.tasklet.Tasklet;
 import org.springframework.batch.repeat.RepeatStatus;
@@ -171,15 +174,14 @@ public class SpringBatchApplication {
                 .on("TRIM_REQUIRED").to(removeThornsStep()).next(arrangeFlowersStep())
                 .from(selectFlowersStep())
                 .on("NO_TRIM_REQUIRED").to(arrangeFlowersStep())
+                .from(arrangeFlowersStep()).on("*").to(deliveryFlow())
                 .end()
                 .build();
     }
 
     @Bean
-    public Job deliverPackageJob() {
-        return this.jobBuilderFactory.get("deliverPackageJob")
-                .start(packageItemStep())
-                .next(driveToAddressStep())
+    public Flow deliveryFlow() {
+        return new FlowBuilder<SimpleFlow>("deliveryFlow").start(driveToAddressStep())
                 .on("FAILED")
                 .to(storePackageStep())
                 .from(driveToAddressStep())
@@ -191,7 +193,14 @@ public class SpringBatchApplication {
                 .from(receiptDecider()).on("INCORRECT").to(refundCustomerStep())
                 .from(decider())
                 .on("NOT_PRESENT")
-                .to(leaveAtDoorStep())
+                .to(leaveAtDoorStep()).build();
+    }
+
+    @Bean
+    public Job deliverPackageJob() {
+        return this.jobBuilderFactory.get("deliverPackageJob")
+                .start(packageItemStep())
+                .on("*").to(deliveryFlow())
                 .end()
                 .build();
     }
