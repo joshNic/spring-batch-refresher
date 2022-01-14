@@ -6,6 +6,7 @@ import org.springframework.batch.core.StepContribution;
 import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
 import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
 import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
+import org.springframework.batch.core.job.flow.JobExecutionDecider;
 import org.springframework.batch.core.scope.context.ChunkContext;
 import org.springframework.batch.core.step.tasklet.Tasklet;
 import org.springframework.batch.repeat.RepeatStatus;
@@ -24,7 +25,9 @@ public class SpringBatchApplication {
     @Autowired
     public StepBuilderFactory stepBuilderFactory;
 
-
+    public static void main(String[] args) {
+        SpringApplication.run(SpringBatchApplication.class, args);
+    }
 
     @Bean
     public Step packageItemStep() {
@@ -35,7 +38,7 @@ public class SpringBatchApplication {
                 String item = chunkContext.getStepContext().getJobParameters().get("item").toString();
                 String date = chunkContext.getStepContext().getJobParameters().get("run.date").toString();
 
-                System.out.println(String.format("The %s has been packaged on %s",item,date));
+                System.out.println(String.format("The %s has been packaged on %s", item, date));
                 return RepeatStatus.FINISHED;
             }
         }).build();
@@ -45,14 +48,20 @@ public class SpringBatchApplication {
     public Step driveToAddressStep() {
         return this.stepBuilderFactory.get("driveToAddress").tasklet(new Tasklet() {
 
-            boolean GOT_LOST = true;
+            final boolean GOT_LOST = false;
+
             @Override
             public RepeatStatus execute(StepContribution stepContribution, ChunkContext chunkContext) throws Exception {
-                if (GOT_LOST)throw new RuntimeException("Got lost driving to customer address");
+                if (GOT_LOST) throw new RuntimeException("Got lost driving to customer address");
                 System.out.println("Successfully arrived at the address");
                 return RepeatStatus.FINISHED;
             }
         }).build();
+    }
+
+    @Bean
+    public JobExecutionDecider decider() {
+        return new DeliveryDecider();
     }
 
     @Bean
@@ -61,6 +70,17 @@ public class SpringBatchApplication {
             @Override
             public RepeatStatus execute(StepContribution stepContribution, ChunkContext chunkContext) throws Exception {
                 System.out.println("Storing the package while the customer address is being located ");
+                return RepeatStatus.FINISHED;
+            }
+        }).build();
+    }
+
+    @Bean
+    public Step leaveAtDoorStep() {
+        return this.stepBuilderFactory.get("leaveAtDoorStep").tasklet(new Tasklet() {
+            @Override
+            public RepeatStatus execute(StepContribution stepContribution, ChunkContext chunkContext) throws Exception {
+                System.out.println("Leaving the package at the door");
                 return RepeatStatus.FINISHED;
             }
         }).build();
@@ -78,19 +98,22 @@ public class SpringBatchApplication {
     }
 
     @Bean
-    public Job deliverPackageJob(){
+    public Job deliverPackageJob() {
         return this.jobBuilderFactory.get("deliverPackageJob")
                 .start(packageItemStep())
                 .next(driveToAddressStep())
-                .on("FAILED").to(storePackageStep())
+                .on("FAILED")
+                .to(storePackageStep())
                 .from(driveToAddressStep())
-                .on("*").to(givePackageToCustomerStep())
+                .on("*")
+                .to(decider())
+                .on("PRESENT")
+                .to(givePackageToCustomerStep())
+                .from(decider())
+                .on("NOT_PRESENT")
+                .to(leaveAtDoorStep())
                 .end()
                 .build();
-    }
-
-    public static void main(String[] args) {
-        SpringApplication.run(SpringBatchApplication.class, args);
     }
 
 }
