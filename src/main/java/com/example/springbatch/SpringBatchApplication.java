@@ -63,6 +63,9 @@ public class SpringBatchApplication {
     public static String INSERT_ORDER_SQL = "insert into SHIPPED_ORDER_OUTPUT(order_id,first_name," +
             "last_name,email,item_id,item_name,cost," +
             "ship_date) values(?,?,?,?,?,?,?,?)";
+    public static String INSERT_ORDER_SQL_NAMED_PARAMETERS = "insert into SHIPPED_ORDER_OUTPUT(order_id,first_name," +
+            "last_name,email,item_id,item_name,cost," +
+            "ship_date) values(:orderId,:firstName,:lastName,:email,:itemId,:itemName,:cost,:shipDate)";
     @Autowired
     public JobBuilderFactory jobBuilderFactory;
     @Autowired
@@ -293,6 +296,15 @@ public class SpringBatchApplication {
                 .dataSource(dataSource)
                 .sql(INSERT_ORDER_SQL)
                 .itemPreparedStatementSetter(new OrderItemPreparedStatementSetter())
+                .build();
+    }
+
+    @Bean
+    public ItemWriter<Order> orderItemWriterDatabaseParameters(){
+        return new JdbcBatchItemWriterBuilder<Order>()
+                .dataSource(dataSource)
+                .sql(INSERT_ORDER_SQL_NAMED_PARAMETERS)
+                .beanMapped()
                 .build();
     }
 
