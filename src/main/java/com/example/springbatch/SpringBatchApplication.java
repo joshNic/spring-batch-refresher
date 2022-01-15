@@ -19,6 +19,7 @@ import org.springframework.batch.item.database.AbstractPagingItemReader;
 import org.springframework.batch.item.database.JdbcCursorItemReader;
 import org.springframework.batch.item.database.JdbcPagingItemReader;
 import org.springframework.batch.item.database.PagingQueryProvider;
+import org.springframework.batch.item.database.builder.JdbcBatchItemWriterBuilder;
 import org.springframework.batch.item.database.builder.JdbcCursorItemReaderBuilder;
 import org.springframework.batch.item.database.builder.JdbcPagingItemReaderBuilder;
 import org.springframework.batch.item.database.support.SqlPagingQueryProviderFactoryBean;
@@ -58,6 +59,10 @@ public class SpringBatchApplication {
     public static String ORDER_SQL = "select order_id,first_name," +
             "last_name,email,cost,item_id,item_name," +
             "ship_date from SHIPPED_ORDER order by order_id";
+
+    public static String INSERT_ORDER_SQL = "insert into SHIPPED_ORDER_OUTPUT(order_id,first_name," +
+            "last_name,email,item_id,item_name,cost," +
+            "ship_date) values(?,?,?,?,?,?,?,?)";
     @Autowired
     public JobBuilderFactory jobBuilderFactory;
     @Autowired
@@ -283,6 +288,15 @@ public class SpringBatchApplication {
     }
 
     @Bean
+    public ItemWriter<Order> orderItemWriterDatabase(){
+        return new JdbcBatchItemWriterBuilder<Order>()
+                .dataSource(dataSource)
+                .sql(INSERT_ORDER_SQL)
+                .itemPreparedStatementSetter(new OrderItemPreparedStatementSetter())
+                .build();
+    }
+
+    @Bean
     public PagingQueryProvider queryProvider() throws Exception {
         SqlPagingQueryProviderFactoryBean factory = new SqlPagingQueryProviderFactoryBean();
         factory.setSelectClause("select order_id,first_name,last_name,email,cost,item_id,item_name,ship_date");
@@ -367,6 +381,13 @@ public class SpringBatchApplication {
     }
 
     @Bean
+    public Step orderChunkWriterDatabaseStep() throws Exception {
+        return this.stepBuilderFactory.get("orderChunkWriterDatabaseStep").<Order, Order>chunk(10)
+                .reader(itemReaderDatabaseMultiThread())
+                .writer(orderItemWriterDatabase()).build();
+    }
+
+    @Bean
     public ItemWriter<Order> itemWriter() {
         FlatFileItemWriter<Order> itemWriter = new FlatFileItemWriter<>();
 
@@ -404,6 +425,11 @@ public class SpringBatchApplication {
     @Bean
     public Job orderWriterJob() throws Exception {
         return this.jobBuilderFactory.get("orderWriterJob").start(orderChunkWriterStep()).build();
+    }
+
+    @Bean
+    public Job orderWriterDatabaseJob() throws Exception {
+        return this.jobBuilderFactory.get("orderWriterDatabaseJob").start(orderChunkWriterDatabaseStep()).build();
     }
 
     /**
