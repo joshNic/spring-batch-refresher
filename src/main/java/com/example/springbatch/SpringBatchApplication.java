@@ -13,12 +13,16 @@ import org.springframework.batch.core.job.flow.JobExecutionDecider;
 import org.springframework.batch.core.job.flow.support.SimpleFlow;
 import org.springframework.batch.core.scope.context.ChunkContext;
 import org.springframework.batch.core.step.tasklet.Tasklet;
+import org.springframework.batch.item.ItemReader;
+import org.springframework.batch.item.ItemWriter;
 import org.springframework.batch.repeat.RepeatStatus;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
+
+import java.util.List;
 
 @SpringBootApplication
 @EnableBatchProcessing
@@ -158,7 +162,7 @@ public class SpringBatchApplication {
     }
 
     @Bean
-    public Step nestedBillingJobStep(){
+    public Step nestedBillingJobStep() {
         return this.stepBuilderFactory.get("nestedBillingJobStep").job(billingJob()).build();
     }
 
@@ -168,7 +172,7 @@ public class SpringBatchApplication {
     }
 
     @Bean
-    public Step sendInvoiceStep(){
+    public Step sendInvoiceStep() {
         return this.stepBuilderFactory.get("invoiceStep").tasklet(new Tasklet() {
             @Override
             public RepeatStatus execute(StepContribution stepContribution, ChunkContext chunkContext) throws Exception {
@@ -190,7 +194,7 @@ public class SpringBatchApplication {
     }
 
     @Bean
-    public Flow billingFlow(){
+    public Flow billingFlow() {
         return new FlowBuilder<SimpleFlow>("billingFlow").start(sendInvoiceStep()).build();
     }
 
@@ -224,11 +228,35 @@ public class SpringBatchApplication {
     }
 
     @Bean
+    public ItemReader<String> itemReader() {
+        return new SimpleItemReader();
+    }
+
+
+    @Bean
+    public Step chunkBasedStep() {
+        return this.stepBuilderFactory.get("chunkBasedStep").<String, String>chunk(3).reader(itemReader())
+                .writer(new ItemWriter<String>() {
+                    @Override
+                    public void write(List<? extends String> list) throws Exception {
+                        System.out.println(String.format("Recieved list of size: %s", list.size()));
+                        list.forEach(System.out::println);
+                    }
+                }).build();
+    }
+
+    @Bean
+    public Job job() {
+        return this.jobBuilderFactory.get("job").start(chunkBasedStep()).build();
+    }
+
+
+    @Bean
     public Job deliverPackageJob() {
         return this.jobBuilderFactory.get("deliverPackageJob")
                 .start(packageItemStep())
                 .split(new SimpleAsyncTaskExecutor())
-                .add(deliveryFlow(),billingFlow())
+                .add(deliveryFlow(), billingFlow())
 //                .on("*").to(deliveryFlow())
 //                .next(nestedBillingJobStep())
                 .end()
