@@ -15,6 +15,13 @@ import org.springframework.batch.core.scope.context.ChunkContext;
 import org.springframework.batch.core.step.tasklet.Tasklet;
 import org.springframework.batch.item.ItemReader;
 import org.springframework.batch.item.ItemWriter;
+import org.springframework.batch.item.database.AbstractPagingItemReader;
+import org.springframework.batch.item.database.JdbcCursorItemReader;
+import org.springframework.batch.item.database.JdbcPagingItemReader;
+import org.springframework.batch.item.database.PagingQueryProvider;
+import org.springframework.batch.item.database.builder.JdbcCursorItemReaderBuilder;
+import org.springframework.batch.item.database.builder.JdbcPagingItemReaderBuilder;
+import org.springframework.batch.item.database.support.SqlPagingQueryProviderFactoryBean;
 import org.springframework.batch.item.file.FlatFileItemReader;
 import org.springframework.batch.item.file.mapping.DefaultLineMapper;
 import org.springframework.batch.item.file.transform.DelimitedLineTokenizer;
@@ -25,16 +32,28 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
+import org.springframework.jdbc.core.RowMapper;
 
+import javax.sql.DataSource;
 import java.util.List;
 
 @SpringBootApplication
 @EnableBatchProcessing
 public class SpringBatchApplication {
 
+    /**
+     * Start of ChunkBasedJobs
+     */
+
+
+    public static String[] tokens = new String[]{
+            "order_id", "first_name", "last_name", "email", "cost", "item_id", "item_name", "ship_date"
+    };
+    public static String ORDER_SQL = "select order_id,first_name," +
+            "last_name,email,cost,item_id,item_name," +
+            "ship_date from SHIPPED_ORDER order by order_id";
     @Autowired
     public JobBuilderFactory jobBuilderFactory;
-
     @Autowired
     public StepBuilderFactory stepBuilderFactory;
 
@@ -142,7 +161,6 @@ public class SpringBatchApplication {
         }).listener(stepExecutionListener()).build();
     }
 
-
     @Bean
     public Step removeThornsStep() {
         return this.stepBuilderFactory.get("removeThornsStep").tasklet(new Tasklet() {
@@ -231,17 +249,41 @@ public class SpringBatchApplication {
                 .to(leaveAtDoorStep()).build();
     }
 
-    /**
-     * Start of ChunkBasedJobs
-     */
-
-
-    public static String[] tokens = new String[]{
-            "order_id","first_name","last_name","email","cost","item_id","item_name","ship_date"
-    };
     @Bean
     public ItemReader<String> itemReaderSimpleData() {
         return new SimpleItemReader();
+    }
+
+    @Autowired
+    public DataSource dataSource;
+    @Bean
+    public ItemReader<Order> itemReaderDatabaseSingleThread(){
+        return new JdbcCursorItemReaderBuilder<Order>().dataSource(dataSource)
+                .name("jdbcCursorItemReader")
+                .sql(ORDER_SQL)
+                .rowMapper(new OrderRowMapper())
+                .build();
+    }
+
+    @Bean
+    public ItemReader<Order> itemReaderDatabaseMultiThread() throws Exception {
+        return new JdbcPagingItemReaderBuilder<Order>()
+                .dataSource(dataSource)
+                .name("jdbcCursorItemReader")
+                .queryProvider(queryProvider())
+                .rowMapper(new OrderRowMapperMulti())
+                .pageSize(10)
+                .build();
+    }
+
+    @Bean
+    public PagingQueryProvider queryProvider() throws Exception {
+        SqlPagingQueryProviderFactoryBean factory = new SqlPagingQueryProviderFactoryBean();
+        factory.setSelectClause("select order_id,first_name,last_name,email,cost,item_id,item_name,ship_date");
+        factory.setFromClause("from SHIPPED_ORDER");
+        factory.setSortKey("order_id");
+        factory.setDataSource(dataSource);
+        return factory.getObject();
     }
 
     @Bean
@@ -284,6 +326,32 @@ public class SpringBatchApplication {
     }
 
     @Bean
+    public Step orderChunkDatabaseSingleThreadStep() {
+        return this.stepBuilderFactory.get("orderChunkDatabaseSingleThreadStep").<Order, Order>chunk(10)
+                .reader(itemReaderDatabaseSingleThread())
+                .writer(new ItemWriter<Order>() {
+                    @Override
+                    public void write(List<? extends Order> list) throws Exception {
+                        System.out.println(String.format("Recieved list of size: %s", list.size()));
+                        list.forEach(System.out::println);
+                    }
+                }).build();
+    }
+
+    @Bean
+    public Step orderChunkDatabaseMultiThreadStep() throws Exception {
+        return this.stepBuilderFactory.get("orderChunkDatabaseMultiThreadStep").<Order, Order>chunk(10)
+                .reader(itemReaderDatabaseMultiThread())
+                .writer(new ItemWriter<Order>() {
+                    @Override
+                    public void write(List<? extends Order> list) throws Exception {
+                        System.out.println(String.format("Recieved list of size: %s", list.size()));
+                        list.forEach(System.out::println);
+                    }
+                }).build();
+    }
+
+    @Bean
     public Job job() {
         return this.jobBuilderFactory.get("job").start(chunkBasedStep()).build();
     }
@@ -293,8 +361,17 @@ public class SpringBatchApplication {
         return this.jobBuilderFactory.get("orderJob").start(orderChunkStep()).build();
     }
 
+    @Bean
+    public Job orderDatabaseSingleThreadJob() {
+        return this.jobBuilderFactory.get("orderDatabaseSingleThreadJob").start(orderChunkDatabaseSingleThreadStep()).build();
+    }
+
+    @Bean
+    public Job orderDatabaseMultiThreadJob() throws Exception {
+        return this.jobBuilderFactory.get("orderDatabaseMultiThreadJob").start(orderChunkDatabaseMultiThreadStep()).build();
+    }
+
     /**
-     *
      * End of ChunkBasedJobs
      */
 
