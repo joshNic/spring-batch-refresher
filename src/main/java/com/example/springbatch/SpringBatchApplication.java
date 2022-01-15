@@ -23,7 +23,10 @@ import org.springframework.batch.item.database.builder.JdbcCursorItemReaderBuild
 import org.springframework.batch.item.database.builder.JdbcPagingItemReaderBuilder;
 import org.springframework.batch.item.database.support.SqlPagingQueryProviderFactoryBean;
 import org.springframework.batch.item.file.FlatFileItemReader;
+import org.springframework.batch.item.file.FlatFileItemWriter;
 import org.springframework.batch.item.file.mapping.DefaultLineMapper;
+import org.springframework.batch.item.file.transform.BeanWrapperFieldExtractor;
+import org.springframework.batch.item.file.transform.DelimitedLineAggregator;
 import org.springframework.batch.item.file.transform.DelimitedLineTokenizer;
 import org.springframework.batch.repeat.RepeatStatus;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -48,6 +51,9 @@ public class SpringBatchApplication {
 
     public static String[] tokens = new String[]{
             "order_id", "first_name", "last_name", "email", "cost", "item_id", "item_name", "ship_date"
+    };
+    public static String[] names = new String[]{
+            "orderId", "firstName", "lastName", "email", "cost", "itemId", "itemName", "shipDate"
     };
     public static String ORDER_SQL = "select order_id,first_name," +
             "last_name,email,cost,item_id,item_name," +
@@ -312,6 +318,7 @@ public class SpringBatchApplication {
                 }).build();
     }
 
+
     @Bean
     public Step orderChunkStep() {
         return this.stepBuilderFactory.get("orderChunkStep").<Order, Order>chunk(3)
@@ -351,6 +358,29 @@ public class SpringBatchApplication {
                 }).build();
     }
 
+
+    @Bean
+    public Step orderChunkWriterStep() throws Exception {
+        return this.stepBuilderFactory.get("orderChunkWriterStep").<Order, Order>chunk(10)
+                .reader(itemReaderDatabaseMultiThread())
+                .writer(itemWriter()).build();
+    }
+
+    @Bean
+    public ItemWriter<Order> itemWriter() {
+        FlatFileItemWriter<Order> itemWriter = new FlatFileItemWriter<>();
+
+        itemWriter.setResource(new FileSystemResource("/Users/joshua/Desktop/EA/springBatch/shipped_orders_output.csv"));
+        DelimitedLineAggregator<Order> aggregator = new DelimitedLineAggregator<>();
+        aggregator.setDelimiter(",");
+
+        BeanWrapperFieldExtractor<Order> fieldExtractor = new BeanWrapperFieldExtractor<>();
+        fieldExtractor.setNames(names);
+        aggregator.setFieldExtractor(fieldExtractor);
+        itemWriter.setLineAggregator(aggregator);
+        return itemWriter;
+    }
+
     @Bean
     public Job job() {
         return this.jobBuilderFactory.get("job").start(chunkBasedStep()).build();
@@ -369,6 +399,11 @@ public class SpringBatchApplication {
     @Bean
     public Job orderDatabaseMultiThreadJob() throws Exception {
         return this.jobBuilderFactory.get("orderDatabaseMultiThreadJob").start(orderChunkDatabaseMultiThreadStep()).build();
+    }
+
+    @Bean
+    public Job orderWriterJob() throws Exception {
+        return this.jobBuilderFactory.get("orderWriterJob").start(orderChunkWriterStep()).build();
     }
 
     /**
