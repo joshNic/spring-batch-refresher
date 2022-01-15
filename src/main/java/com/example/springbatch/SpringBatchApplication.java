@@ -15,11 +15,15 @@ import org.springframework.batch.core.scope.context.ChunkContext;
 import org.springframework.batch.core.step.tasklet.Tasklet;
 import org.springframework.batch.item.ItemReader;
 import org.springframework.batch.item.ItemWriter;
+import org.springframework.batch.item.file.FlatFileItemReader;
+import org.springframework.batch.item.file.mapping.DefaultLineMapper;
+import org.springframework.batch.item.file.transform.DelimitedLineTokenizer;
 import org.springframework.batch.repeat.RepeatStatus;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
 
 import java.util.List;
@@ -227,15 +231,36 @@ public class SpringBatchApplication {
                 .to(leaveAtDoorStep()).build();
     }
 
+    /**
+     * Start of ChunkBasedJobs
+     */
+
+
+    public static String[] tokens = new String[]{
+            "order_id","first_name","last_name","email","cost","item_id","item_name","ship_date"
+    };
     @Bean
-    public ItemReader<String> itemReader() {
+    public ItemReader<String> itemReaderSimpleData() {
         return new SimpleItemReader();
     }
 
+    @Bean
+    public ItemReader<Order> orderItemReader() {
+        FlatFileItemReader<Order> itemReader = new FlatFileItemReader<>();
+        itemReader.setLinesToSkip(1);
+        itemReader.setResource(new FileSystemResource("/Users/joshua/Desktop/EA/springBatch/shipped_orders.csv"));
+        DefaultLineMapper<Order> lineMapper = new DefaultLineMapper<>();
+        DelimitedLineTokenizer tokenizer = new DelimitedLineTokenizer();
+        tokenizer.setNames(tokens);
+        lineMapper.setLineTokenizer(tokenizer);
+        lineMapper.setFieldSetMapper(new OrderFieldSetMapper());
+        itemReader.setLineMapper(lineMapper);
+        return itemReader;
+    }
 
     @Bean
     public Step chunkBasedStep() {
-        return this.stepBuilderFactory.get("chunkBasedStep").<String, String>chunk(3).reader(itemReader())
+        return this.stepBuilderFactory.get("chunkBasedStep").<String, String>chunk(3).reader(itemReaderSimpleData())
                 .writer(new ItemWriter<String>() {
                     @Override
                     public void write(List<? extends String> list) throws Exception {
@@ -246,9 +271,32 @@ public class SpringBatchApplication {
     }
 
     @Bean
+    public Step orderChunkStep() {
+        return this.stepBuilderFactory.get("orderChunkStep").<Order, Order>chunk(3)
+                .reader(orderItemReader())
+                .writer(new ItemWriter<Order>() {
+                    @Override
+                    public void write(List<? extends Order> list) throws Exception {
+                        System.out.println(String.format("Recieved list of size: %s", list.size()));
+                        list.forEach(System.out::println);
+                    }
+                }).build();
+    }
+
+    @Bean
     public Job job() {
         return this.jobBuilderFactory.get("job").start(chunkBasedStep()).build();
     }
+
+    @Bean
+    public Job orderJob() {
+        return this.jobBuilderFactory.get("orderJob").start(orderChunkStep()).build();
+    }
+
+    /**
+     *
+     * End of ChunkBasedJobs
+     */
 
 
     @Bean
