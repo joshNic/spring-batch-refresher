@@ -15,9 +15,6 @@ import org.springframework.batch.core.scope.context.ChunkContext;
 import org.springframework.batch.core.step.tasklet.Tasklet;
 import org.springframework.batch.item.ItemReader;
 import org.springframework.batch.item.ItemWriter;
-import org.springframework.batch.item.database.AbstractPagingItemReader;
-import org.springframework.batch.item.database.JdbcCursorItemReader;
-import org.springframework.batch.item.database.JdbcPagingItemReader;
 import org.springframework.batch.item.database.PagingQueryProvider;
 import org.springframework.batch.item.database.builder.JdbcBatchItemWriterBuilder;
 import org.springframework.batch.item.database.builder.JdbcCursorItemReaderBuilder;
@@ -29,6 +26,8 @@ import org.springframework.batch.item.file.mapping.DefaultLineMapper;
 import org.springframework.batch.item.file.transform.BeanWrapperFieldExtractor;
 import org.springframework.batch.item.file.transform.DelimitedLineAggregator;
 import org.springframework.batch.item.file.transform.DelimitedLineTokenizer;
+import org.springframework.batch.item.json.JacksonJsonObjectMarshaller;
+import org.springframework.batch.item.json.builder.JsonFileItemWriterBuilder;
 import org.springframework.batch.repeat.RepeatStatus;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringApplication;
@@ -36,7 +35,6 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
-import org.springframework.jdbc.core.RowMapper;
 
 import javax.sql.DataSource;
 import java.util.List;
@@ -70,6 +68,8 @@ public class SpringBatchApplication {
     public JobBuilderFactory jobBuilderFactory;
     @Autowired
     public StepBuilderFactory stepBuilderFactory;
+    @Autowired
+    public DataSource dataSource;
 
     public static void main(String[] args) {
         SpringApplication.run(SpringBatchApplication.class, args);
@@ -268,10 +268,8 @@ public class SpringBatchApplication {
         return new SimpleItemReader();
     }
 
-    @Autowired
-    public DataSource dataSource;
     @Bean
-    public ItemReader<Order> itemReaderDatabaseSingleThread(){
+    public ItemReader<Order> itemReaderDatabaseSingleThread() {
         return new JdbcCursorItemReaderBuilder<Order>().dataSource(dataSource)
                 .name("jdbcCursorItemReader")
                 .sql(ORDER_SQL)
@@ -291,7 +289,7 @@ public class SpringBatchApplication {
     }
 
     @Bean
-    public ItemWriter<Order> orderItemWriterDatabase(){
+    public ItemWriter<Order> orderItemWriterDatabase() {
         return new JdbcBatchItemWriterBuilder<Order>()
                 .dataSource(dataSource)
                 .sql(INSERT_ORDER_SQL)
@@ -300,7 +298,7 @@ public class SpringBatchApplication {
     }
 
     @Bean
-    public ItemWriter<Order> orderItemWriterDatabaseParameters(){
+    public ItemWriter<Order> orderItemWriterDatabaseParameters() {
         return new JdbcBatchItemWriterBuilder<Order>()
                 .dataSource(dataSource)
                 .sql(INSERT_ORDER_SQL_NAMED_PARAMETERS)
@@ -392,6 +390,7 @@ public class SpringBatchApplication {
                 .writer(itemWriter()).build();
     }
 
+
     @Bean
     public Step orderChunkWriterDatabaseStep() throws Exception {
         return this.stepBuilderFactory.get("orderChunkWriterDatabaseStep").<Order, Order>chunk(10)
@@ -412,6 +411,22 @@ public class SpringBatchApplication {
         aggregator.setFieldExtractor(fieldExtractor);
         itemWriter.setLineAggregator(aggregator);
         return itemWriter;
+    }
+
+    @Bean
+    public ItemWriter<Order> itemWriterJson() {
+        return new JsonFileItemWriterBuilder<Order>()
+                .jsonObjectMarshaller(new JacksonJsonObjectMarshaller<>())
+                .resource(new FileSystemResource("/Users/joshua/Desktop/EA/springBatch/shipped_orders_output.json"))
+                .name("jsonItemWriter")
+                .build();
+    }
+
+    @Bean
+    public Step orderChunkWriterJsonStep() throws Exception {
+        return this.stepBuilderFactory.get("orderChunkWriterJsonStep").<Order, Order>chunk(10)
+                .reader(itemReaderDatabaseMultiThread())
+                .writer(itemWriterJson()).build();
     }
 
     @Bean
@@ -442,6 +457,11 @@ public class SpringBatchApplication {
     @Bean
     public Job orderWriterDatabaseJob() throws Exception {
         return this.jobBuilderFactory.get("orderWriterDatabaseJob").start(orderChunkWriterDatabaseStep()).build();
+    }
+
+    @Bean
+    public Job orderWriterJsonJob() throws Exception {
+        return this.jobBuilderFactory.get("orderWriterJsonJob").start(orderChunkWriterJsonStep()).build();
     }
 
     /**
